@@ -1,50 +1,79 @@
 """
-	This file contains a neural network module for us to
-	define our actor and critic networks in PPO.
+    This file contains a neural network module for us to
+    define our actor and critic networks in PPO.
 """
 
 import torch
 from torch import nn
-import torch.nn.functional as F
-import numpy as np
+from torchvision import models
 
-class FeedForwardNN(nn.Module):
-	"""
-		A standard in_dim-64-64-out_dim Feed Forward Neural Network.
-	"""
-	def __init__(self, in_dim, out_dim):
-		"""
-			Initialize the network and set up the layers.
+class PointNavNet(nn.Module):
+    def __init__(self, num_channels, num_outputs, batch_size) -> None:
+        super().__init__()
+        self.visual_encoder = VisualEncoder(num_channels, 512-32-32)
+        self.pointgoal_encoder = PointgoalEncoder()
+        self.last_action_encoder = LastActionEncoder()
+        self.rnn = RNN(512, 512, num_outputs, 1)
+        self.hidden = self.rnn.init_hidden(batch_size)
 
-			Parameters:
-				in_dim - input dimensions as an int
-				out_dim - output dimensions as an int
+    def forward(self, visual, pointgoal, last_action):
+        visual_encoded = self.visual_encoder(visual)
+        pointgoal_encoded = self.pointgoal_encoder(pointgoal)
+        last_action_encoded = self.last_action_encoder(last_action)
+        rnn_input = torch.cat((visual_encoded, pointgoal_encoded, last_action_encoded), dim=1).unsqueeze(dim=0)
+        output = self.rnn(rnn_input, self.hidden)
+        return output
 
-			Return:
-				None
-		"""
-		super(FeedForwardNN, self).__init__()
+class VisualEncoder(nn.Module):
+    def __init__(self, num_channels, num_outputs):
+        super().__init__()
+        self.cnn = models.resnet50()
 
-		self.layer1 = nn.Linear(in_dim, 64)
-		self.layer2 = nn.Linear(64, 64)
-		self.layer3 = nn.Linear(64, out_dim)
+        self.cnn.conv1 = nn.Conv2d(num_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.cnn.fc = nn.Linear(self.cnn.fc.in_features, num_outputs)
+        
+    def forward(self, input):
+        output = self.cnn(input)
+        return output
 
-	def forward(self, obs):
-		"""
-			Runs a forward pass on the neural network.
+class PointgoalEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.Linear(3, 32)
 
-			Parameters:
-				obs - observation to pass as input
+    def forward(self, input):
+        input = torch.stack((input[:,0], torch.cos(input[:,1]), torch.sin(input[:,1])), dim=-1)
+        output = self.encoder(input)
+        return output
 
-			Return:
-				output - the output of our forward pass
-		"""
-		# Convert observation to tensor if it's a numpy array
-		if isinstance(obs, np.ndarray):
-			obs = torch.tensor(obs, dtype=torch.float)
 
-		activation1 = F.relu(self.layer1(obs))
-		activation2 = F.relu(self.layer2(activation1))
-		output = self.layer3(activation2)
+class LastActionEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.Linear(1, 32)
 
-		return output
+    def forward(self, input):
+        output = self.encoder(input)
+        return output
+
+class RNN(nn.Module):
+    # https://blog.floydhub.com/gru-with-pytorch/
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, drop_prob=0.2):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.gru = nn.GRU(input_dim, hidden_dim, num_layers,
+                          batch_first=True, dropout=drop_prob)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.relu = nn.ReLU()
+
+    def init_hidden(self, batch_size):
+        weight = next(self.parameters()).data
+        hidden = weight.new(self.num_layers, batch_size,
+                            self.hidden_dim).zero_()
+        return hidden.data
+
+    def forward(self, input, hidden):
+        output, hidden = self.gru(input, hidden)
+        output = self.fc(self.relu(output[:,-1]))
+        return output, hidden
