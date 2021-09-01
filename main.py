@@ -109,7 +109,7 @@ def main(args):
     # Creates the environment we'll be running. If you want to replace with your own
     # custom environment, note that it must inherit Gym and have both continuous
     # observation and action spaces.
-    env = PointNavEnv(config=habitat.get_config("configs/tasks/pointnav_gibson.yaml"))
+    env = PointNavEnv(config=habitat.get_config("configs/tasks/pointnav_mp3d.yaml"))
 
     # Train or test, depending on the mode specified
     if args.mode == 'train':

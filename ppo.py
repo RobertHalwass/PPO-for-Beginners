@@ -40,7 +40,7 @@ class PPO:
 
         # Extract environment information
         self.env = env
-        self.obs_dim = (self.num_channels, 224, 224)
+        self.obs_dim = (self.num_channels, 256, 256)
         self.act_dim = env.action_space.shape[0]
 
          # Initialize actor and critic networks
@@ -166,7 +166,9 @@ class PPO:
                 batch_lens - the lengths of each episode this batch. Shape: (number of episodes)
         """
         # Batch data. For more details, check function header.
-        batch_obs = []
+        batch_visual = []
+        batch_pointgoal = []
+        batch_last_action = []
         batch_acts = []
         batch_log_probs = []
         batch_rews = []
@@ -186,6 +188,7 @@ class PPO:
             # Reset the environment. sNote that obs is short for observation. 
             obs = self.env.reset()
             done = False
+            last_action = torch.zeros((self.act_dim))
 
             # Run an episode for a maximum of max_timesteps_per_episode timesteps
             for ep_t in range(self.max_timesteps_per_episode):
@@ -195,12 +198,16 @@ class PPO:
 
                 t += 1 # Increment timesteps ran this batch so far
 
+                visual, pointgoal = self.get_inputs(obs)
+
                 # Track observations in this batch
-                batch_obs.append(obs)
+                batch_visual.append(visual)
+                batch_pointgoal.append(pointgoal)
+                batch_last_action.append(last_action)
 
                 # Calculate action and make a step in the env. 
                 # Note that rew is short for reward.
-                action, log_prob = self.get_action(obs)
+                action, log_prob = self.get_action(visual, pointgoal, last_action)
                 obs, rew, done, _ = self.env.step(action)
 
                 # Track recent reward, action, and action log probability
@@ -217,7 +224,9 @@ class PPO:
             batch_rews.append(ep_rews)
 
         # Reshape data as tensors in the shape specified in function description, before returning
-        batch_obs = torch.tensor(batch_obs, dtype=torch.float)
+        batch_visual = torch.tensor(batch_visual, dtype=torch.float)
+        batch_pointgoal = torch.tensor(batch_pointgoal, dtype=torch.float)
+        batch_last_action = torch.tensor(batch_last_action, dtype=torch.float)
         batch_acts = torch.tensor(batch_acts, dtype=torch.float)
         batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float)
         batch_rtgs = self.compute_rtgs(batch_rews)                                                              # ALG STEP 4
@@ -226,7 +235,20 @@ class PPO:
         self.logger['batch_rews'] = batch_rews
         self.logger['batch_lens'] = batch_lens
 
-        return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens
+        return batch_visual, batch_pointgoal, batch_last_action, batch_acts, batch_log_probs, batch_rtgs, batch_lens
+
+    def get_inputs(self, obs):
+        if self.num_channels == 1:
+            visual = torch.as_tensor(obs["depth"].transpose((2, 0, 1))).unsqueeze(0)
+        elif self.num_channels == 3:
+            visual = torch.as_tensor(obs["rgb"].transpose((2, 0, 1))).unsqueeze(0)
+        elif self.num_channels == 3:
+            rgb = torch.as_tensor(obs["rgb"].transpose((2, 0, 1))).unsqueeze(0)
+            depth = torch.as_tensor(obs["depth"].transpose((2, 0, 1))).unsqueeze(0)
+            visual = torch.cat((rgb,depth), dim=0)
+
+        pointgoal = torch.as_tensor(obs["pointgoal_with_gps_compass"]).unsqueeze(0)
+        return visual, pointgoal
 
     def compute_rtgs(self, batch_rews):
         """
@@ -258,7 +280,7 @@ class PPO:
 
         return batch_rtgs
 
-    def get_action(self, obs):
+    def get_action(self, visual, pointgoal, last_action):
         """
             Queries an action from the actor network, should be called from rollout.
 
@@ -270,7 +292,7 @@ class PPO:
                 log_prob - the log probability of the selected action in the distribution
         """
         # Query the actor network for a mean action
-        mean = self.actor(obs)
+        mean = self.actor(visual, pointgoal, last_action)
 
         # Create a distribution with the mean action and std from the covariance matrix above.
         # For more information on how this distribution works, check out Andrew Ng's lecture on it:
@@ -286,7 +308,7 @@ class PPO:
         # Return the sampled action and the log probability of that action in our distribution
         return action.detach().numpy(), log_prob.detach()
 
-    def evaluate(self, batch_obs, batch_acts):
+    def evaluate(self, batch_visual, batch_pointgoal, batch_last_action, batch_acts):
         """
             Estimate the values of each observation, and the log probs of
             each action in the most recent batch with the most recent
@@ -302,12 +324,13 @@ class PPO:
                 V - the predicted values of batch_obs
                 log_probs - the log probabilities of the actions taken in batch_acts given batch_obs
         """
-        # Query critic network for a value V for each batch_obs. Shape of V should be same as batch_rtgs
-        V = self.critic(batch_obs).squeeze()
+        # Query critic network for a value V for each batch_obs. Shape of V should be same as batch_rtg
+
+        V = self.critic(batch_visual, batch_pointgoal, batch_last_action).squeeze()
 
         # Calculate the log probabilities of batch actions using most recent actor network.
         # This segment of code is similar to that in get_action()
-        mean = self.actor(batch_obs)
+        mean = self.actor(batch_visual, batch_pointgoal, batch_last_action)
         dist = MultivariateNormal(mean, self.cov_mat)
         log_probs = dist.log_prob(batch_acts)
 
