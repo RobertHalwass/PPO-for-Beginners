@@ -31,8 +31,8 @@ class PPO:
 				None
 		"""
 		# Make sure the environment is compatible with our code
-		assert(type(env.observation_space) == gym.spaces.Box)
-		assert(type(env.action_space) == gym.spaces.Box)
+		# assert(type(env.observation_space) == gym.spaces.Box)
+		# assert(type(env.action_space) == gym.spaces.Box)
 
 		# Initialize hyperparameters for training with PPO
 		self._init_hyperparameters(hyperparameters)
