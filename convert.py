@@ -1,18 +1,24 @@
+from os import name
 from network import PointNavNet
 import coremltools as ct
 import torch
-import datetime
+from datetime import datetime
 
-batch_size = 1
+batch_size = 3
 
 model = PointNavNet(3, 4, batch_size)
 model.eval()
 class_labels = ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
 
 example_visual_input = torch.rand((batch_size, 3, 224, 224))
-example_pointgoal_input = torch.rand((batch_size,2))
-example_last_action_input = torch.rand((batch_size,1))
-traced_model = torch.jit.trace(model, (example_visual_input, example_pointgoal_input, example_last_action_input))
+example_pointgoal_input = torch.rand((batch_size, 2))
+example_last_action_input = torch.rand((batch_size, 1))
+#example_hidden_input = torch.rand((1, batch_size, 512))
+
+result = model(example_visual_input, example_pointgoal_input, example_last_action_input)
+print(result)
+
+traced_model = torch.jit.trace(model, (example_visual_input, example_pointgoal_input, example_last_action_input))#example_hidden_input))
 
 coreml_model = ct.converters.convert(
     traced_model,
@@ -20,7 +26,8 @@ coreml_model = ct.converters.convert(
     inputs=[
         ct.TensorType(name="visual", shape=example_visual_input.shape),
         ct.TensorType(name="pointgoal", shape=example_pointgoal_input.shape),
-        ct.TensorType(name="last_action", shape=example_last_action_input.shape)
+        ct.TensorType(name="last_action", shape=example_last_action_input.shape),
+        #ct.TensorType(name="hidden", shape=example_hidden_input.shape)
     ], 
     classifier_config = ct.ClassifierConfig(class_labels)
 )
@@ -28,6 +35,7 @@ coreml_model = ct.converters.convert(
 coreml_model.input_description["visual"] = "Visual Input (Either RGB, Depth or RGB-Depth)"
 coreml_model.input_description["pointgoal"] = "Polar-Coordinates Towards Point Goal"
 coreml_model.input_description["last_action"] = "Last Action Taken By Agent"
+#coreml_model.input_description["hidden"] = "Hidden State of RNN"
 coreml_model.output_description["classLabel"] = "Action To Take"
 
 # Set model author name
