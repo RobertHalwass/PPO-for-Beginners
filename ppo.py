@@ -32,8 +32,8 @@ class PPO:
                 None
         """
         # Make sure the environment is compatible with our code
-        assert(type(env.observation_space) == gym.spaces.Box)
-        assert(type(env.action_space) == gym.spaces.Box)
+        # assert(type(env.observation_space) == gym.spaces.Box)
+        # assert(type(env.action_space) == gym.spaces.Box)
 
         # Initialize hyperparameters for training with PPO
         self._init_hyperparameters(hyperparameters)
@@ -41,11 +41,11 @@ class PPO:
         # Extract environment information
         self.env = env
         self.obs_dim = (self.num_channels, 256, 256)
-        self.act_dim = env.action_space.shape[0]
+        self.act_dim = 4
 
          # Initialize actor and critic networks
-        self.actor = policy_class(self.obs_dim, self.act_dim)                                                   # ALG STEP 1
-        self.critic = policy_class(self.obs_dim, 1)
+        self.actor = policy_class(self.obs_dim, 512, self.act_dim)                                                   # ALG STEP 1
+        self.critic = policy_class(self.obs_dim, 512, 1)
 
         # Initialize optimizers for actor and critic
         self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
